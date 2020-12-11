@@ -52,17 +52,17 @@ const int iRPIPins[] = {-1,-1,-1,2,-1,3,-1,4,14,-1,
 #define VARIANT_MCK 80000000ul
 #endif
 #endif // _LINUX_
-#include <BitBang_I2C.h>
+#include <BitBang_SMBus.h>
 //static int iSCL, iSDA; // keep requested pin numbers in private statics
 //static int iDelay; // bit delay in ms for the requested clock rate
 #if defined ( __AVR__ ) && !defined( ARDUINO_ARCH_MEGAAVR )
-volatile uint8_t *iDDR_SCL, *iPort_SCL_Out;
+volatile uint8_t *iDDR_SCL, *iPort_SCL_In, *iPort_SCL_Out;
 volatile uint8_t *iDDR_SDA, *iPort_SDA_In, *iPort_SDA_Out;
 uint8_t iSDABit, iSCLBit;
 #endif
 #ifdef FUTURE
 //#else // must be a 32-bit MCU
-volatile uint32_t *iDDR_SCL, *iPort_SCL_Out;
+volatile uint32_t *iDDR_SCL, *iPort_SCL_In, *iPort_SCL_Out;
 volatile uint32_t *iDDR_SDA, *iPort_SDA_In, *iPort_SDA_Out;
 uint32_t iSDABit, iSCLBit;
 #endif
@@ -139,6 +139,34 @@ uint32_t getPinInfo(uint8_t pin, volatile uint32_t **iDDR, volatile uint32_t **i
 } /* getPinInfo() */
 #endif // __AVR__
 
+inline uint8_t SCL_READ(uint8_t iSCL)
+{
+#if defined ( __AVR__ ) && !defined( ARDUINO_ARCH_MEGAAVR )
+  if (iSCL >= 0xa0) // direct pin numbering
+  {
+    if (*iPort_SCL_In & iSCLBit)
+       return HIGH;
+    else
+       return LOW;
+  }
+  else
+#endif
+  {
+#ifndef __AVR_ATtiny85__
+#ifdef W600_EV
+    return w600DigitalRead(iSCL);
+#else
+#ifdef _LINUX_
+    return gpioRead(iSCL);
+#else
+    return digitalRead(iSCL);
+#endif // _LINUX
+#endif
+#endif
+  }
+  return 0; // fall through?
+}
+
 inline uint8_t SDA_READ(uint8_t iSDA)
 {
 #if defined ( __AVR__ ) && !defined( ARDUINO_ARCH_MEGAAVR )
@@ -166,6 +194,7 @@ inline uint8_t SDA_READ(uint8_t iSDA)
   }
   return 0; // fall through?
 }
+
 inline void SCL_HIGH(uint8_t iSCL)
 {
 #if defined ( __AVR__ ) && !defined( ARDUINO_ARCH_MEGAAVR )
@@ -313,6 +342,13 @@ int iDelay = pI2C->iDelay;
   SDA_HIGH(iSDA); // set data line for reading
   SCL_HIGH(iSCL); // clock line high
   sleep_us(iDelay); // DEBUG - delay/2
+
+  // check if slave keeps clock bus low (time stretching)
+  while (bool timeStretched = !SCL_READ(iSCL))
+  {
+    sleep_us(iDelay);
+  }
+
   ack = SDA_READ(iSDA);
   SCL_LOW(iSCL); // clock low
   sleep_us(iDelay); // DEBUG - delay/2
@@ -327,6 +363,7 @@ int iDelay = pI2C->iDelay;
 #define SCL_LOW_AVR *iDDR_scl |= sclbit;
 #define SCL_HIGH_AVR *iDDR_scl &= ~sclbit;
 #define SDA_READ_AVR (*iPort_SDA_In & sdabit)
+#define SCL_READ_AVR (*iPort_SCL_In & sclbit)
 static inline int i2cByteOutAVR(BBI2C *pI2C, uint8_t b)
 {
 uint8_t i, ack;
@@ -359,7 +396,7 @@ uint8_t sclbit = iSCLBit;
 
 #define BOTH_LOW_FAST *iDDR = both_low;
 #define BOTH_HIGH_FAST *iDDR = both_high;
-#define SCL_HIGH_FAST *iDDR = scl_high; 
+#define SCL_HIGH_FAST *iDDR = scl_high;
 #define SDA_HIGH_FAST *iDDR = sda_high;
 #define SDA_READ_FAST *iDDR & iSDABit;
 static inline int i2cByteOutAVRFast(BBI2C *pI2C, uint8_t b)
@@ -496,6 +533,20 @@ static inline int i2cBegin(BBI2C *pI2C, uint8_t addr, uint8_t bRead)
    return rc;
 } /* i2cBegin() */
 
+static inline int i2cBeginRepeated(BBI2C *pI2C, uint8_t addr, uint8_t bRead)
+{
+  // prepare repeated start
+  SCL_LOW(pI2C->iSCL); // clock low
+  sleep_us(pI2C->iDelay);
+  SDA_HIGH(pI2C->iSDA); // data high
+  sleep_us(pI2C->iDelay);
+  SCL_HIGH(pI2C->iSCL); // clock high
+  sleep_us(pI2C->iDelay);
+
+  // do repeated start
+  return i2cBegin(pI2C, addr, bRead);
+} /* i2cBeginRepeated() */
+
 static inline int i2cWrite(BBI2C *pI2C, uint8_t *pData, int iLen)
 {
 uint8_t b;
@@ -616,6 +667,7 @@ void I2CInit(BBI2C *pI2C, uint32_t iClock)
       getPinInfo(pI2C->iSDA, &iDDR_SDA, &iPort_SDA_In, 1);
 //      iSCLBit = 1 << (pI2C->iSCL & 0x7);
       iSCLBit = 1 << getPinInfo(pI2C->iSCL, &iDDR_SCL, &iPort_SCL_Out, 0);
+      getPinInfo(pI2C->iSCL, &iDDR_SCL, &iPort_SCL_In, 1);
       *iDDR_SDA &= ~iSDABit; // pinMode input
       *iDDR_SCL &= ~iSCLBit; // pinMode input
       *iPort_SDA_Out &= ~iSDABit; // digitalWrite SDA LOW
@@ -695,7 +747,7 @@ void I2CScan(BBI2C *pI2C, uint8_t *pMap)
 int I2CWrite(BBI2C *pI2C, uint8_t iAddr, uint8_t *pData, int iLen)
 {
   int rc = 0;
-  
+
   if (pI2C->bWire)
   {
 #if !defined ( _LINUX_ ) && !defined( __AVR_ATtiny85__ )
@@ -708,7 +760,7 @@ int I2CWrite(BBI2C *pI2C, uint8_t iAddr, uint8_t *pData, int iLen)
     {
        if (write(pI2C->file_i2c, pData, iLen) >= 0)
           rc = 1;
-    } 
+    }
 #endif // _LINUX_
     return rc;
   }
@@ -723,10 +775,10 @@ int I2CWrite(BBI2C *pI2C, uint8_t iAddr, uint8_t *pData, int iLen)
 //
 // Read N bytes starting at a specific I2C internal register
 //
-int I2CReadRegister(BBI2C *pI2C, uint8_t iAddr, uint8_t u8Register, uint8_t *pData, int iLen)
+int I2CReadRegister(BBI2C *pI2C, uint8_t iAddr, uint8_t u8Register, uint8_t *pData, int iLen, bool repeatedStart)
 {
   int rc;
-  
+
   if (pI2C->bWire) // use the wire library
   {
       int i = 0;
@@ -745,7 +797,7 @@ int I2CReadRegister(BBI2C *pI2C, uint8_t iAddr, uint8_t u8Register, uint8_t *pDa
     {
        write(pI2C->file_i2c, &u8Register, 1);
        i = read(pI2C->file_i2c, pData, iLen);
-    } 
+    }
 #endif // _LINUX_
       return (i > 0);
   }
@@ -755,8 +807,15 @@ int I2CReadRegister(BBI2C *pI2C, uint8_t iAddr, uint8_t u8Register, uint8_t *pDa
      rc = i2cWrite(pI2C, &u8Register, 1); // write the register we want to read from
      if (rc == 1)
      {
-       i2cEnd(pI2C);
-       rc = i2cBegin(pI2C, iAddr, 1); // start a read operation
+       if (repeatedStart)
+        {
+          rc = i2cBeginRepeated(pI2C, iAddr, 1); // start a read operation
+        }
+        else
+        {
+          i2cEnd(pI2C);
+          rc = i2cBegin(pI2C, iAddr, 1); // start a read operation
+        }
        if (rc == 1)
        {
          i2cRead(pI2C, pData, iLen);
@@ -772,7 +831,7 @@ int I2CReadRegister(BBI2C *pI2C, uint8_t iAddr, uint8_t u8Register, uint8_t *pDa
 int I2CRead(BBI2C *pI2C, uint8_t iAddr, uint8_t *pData, int iLen)
 {
   int rc;
-  
+
     if (pI2C->bWire) // use the wire library
     {
         int i = 0;
@@ -787,7 +846,7 @@ int I2CRead(BBI2C *pI2C, uint8_t iAddr, uint8_t *pData, int iLen)
     if (ioctl(pI2C->file_i2c, I2C_SLAVE, iAddr) >= 0)
     {
        i = read(pI2C->file_i2c, pData, iLen);
-    } 
+    }
 #endif // _LINUX_
         return (i > 0);
     }
@@ -818,7 +877,7 @@ int iDevice = DEVICE_UNKNOWN;
        iDevice = DEVICE_SSD1306;
     return iDevice;
   }
-  
+
   if (i == 0x34 || i == 0x35) // Probably an AXP202/AXP192 PMU chip
   {
     I2CReadRegister(pI2C, i, 0x03, cTemp, 1); // chip ID
@@ -827,14 +886,14 @@ int iDevice = DEVICE_UNKNOWN;
     else if (cTemp[0] == 0x03)
        return DEVICE_AXP192;
   }
-  
+
   if (i >= 0x40 && i <= 0x4f) // check for TI INA219 power measurement sensor
   {
     I2CReadRegister(pI2C, i, 0x00, cTemp, 2);
     if (cTemp[0] == 0x39 && cTemp[1] == 0x9f)
        return DEVICE_INA219;
   }
-  
+
   // Check for Microchip 24AAXXXE64 family serial 2 Kbit EEPROM
   if (i >= 0x50 && i <= 0x57) {
     uint32_t u32Temp = 0;
@@ -844,14 +903,14 @@ int iDevice = DEVICE_UNKNOWN;
         u32Temp == 0x00d88039 || u32Temp == 0x005410ec)
       return DEVICE_24AAXXXE64;
   }
-  
+
 //  else if (i == 0x5b) // MLX90615?
 //  {
 //    I2CReadRegister(pI2C, i, 0x10, cTemp, 3);
 //    for (j=0; j<3; j++) Serial.println(cTemp[j], HEX);
 //  }
   // try to identify it from the known devices using register contents
-  {    
+  {
     // Check for TI HDC1080
     I2CReadRegister(pI2C, i, 0xff, cTemp, 2);
     if (cTemp[0] == 0x10 && cTemp[1] == 0x50)
@@ -893,12 +952,12 @@ int iDevice = DEVICE_UNKNOWN;
     I2CReadRegister(pI2C, i, 0x0f, cTemp, 1);
     if (cTemp[0] == 0xbd) // WHO_AM_I
        return DEVICE_LPS25H;
-    
+
     // Check for HTS221 temp/humidity sensor from STMicro
     I2CReadRegister(pI2C, i, 0x0f, cTemp, 1);
     if (cTemp[0] == 0xbc) // WHO_AM_I
        return DEVICE_HTS221;
-    
+
     // Check for MAG3110
     I2CReadRegister(pI2C, i, 0x07, cTemp, 1);
     if (cTemp[0] == 0xc4) // WHO_AM_I
@@ -917,7 +976,7 @@ int iDevice = DEVICE_UNKNOWN;
       if ((cTemp[2] == 3 || cTemp[2] == 2) && cTemp[6] == 0 && cTemp[7] == 0xff)
          return DEVICE_MAX44009;
     }
-       
+
     // Check for ADS1115
     I2CReadRegister(pI2C, i, 0x02, cTemp, 2); // Lo_thresh defaults to 0x8000
     I2CReadRegister(pI2C, i, 0x03, &cTemp[2], 2); // Hi_thresh defaults to 0x7fff
@@ -929,7 +988,7 @@ int iDevice = DEVICE_UNKNOWN;
     I2CReadRegister(pI2C, i, 0x07, &cTemp[2], 2); // need to read them individually
     if (cTemp[0] == 0 && cTemp[1] == 0x54 && cTemp[2] == 0x04 && cTemp[3] == 0x00)
        return DEVICE_MCP9808;
-       
+
     // Check for BMP280/BME280
     I2CReadRegister(pI2C, i, 0xd0, cTemp, 1);
     if (cTemp[0] == 0x55) // BMP180
@@ -943,12 +1002,12 @@ int iDevice = DEVICE_UNKNOWN;
     I2CReadRegister(pI2C, i, 0x0f, cTemp, 1); // WHO_AM_I
     if (cTemp[0] == 0x69)
        return DEVICE_LSM6DS3;
-       
+
     // Check for ADXL345
     I2CReadRegister(pI2C, i, 0x00, cTemp, 1); // DEVID
     if (cTemp[0] == 0xe5)
        return DEVICE_ADXL345;
-       
+
     // Check for MPU-60x0i, MPU-688x, and MPU-9250
     I2CReadRegister(pI2C, i, 0x75, cTemp, 1);
     if (cTemp[0] == (i & 0xfe)) // Current I2C address (low bit set to 0)
@@ -969,7 +1028,7 @@ int iDevice = DEVICE_UNKNOWN;
     if (i == 0x68 &&
         cTemp[0] == 0x03) // fixed I2C address and power on reset value
       return DEVICE_DS1307;
-        
+
   }
   return iDevice;
 } /* I2CDiscoverDevice() */

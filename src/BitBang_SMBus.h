@@ -17,8 +17,8 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 //
-#ifndef __BITBANG_I2C__
-#define __BITBANG_I2C__
+#ifndef __BITBANG_SMBUS__
+#define __BITBANG_SMBUS__
 // supported devices
 enum {
   DEVICE_UNKNOWN = 0,
@@ -76,7 +76,7 @@ int I2CRead(BBI2C *pI2C, uint8_t iAddr, uint8_t *pData, int iLen);
 //
 // Read N bytes starting at a specific I2C internal register
 //
-int I2CReadRegister(BBI2C *pI2C, uint8_t iAddr, uint8_t u8Register, uint8_t *pData, int iLen);
+int I2CReadRegister(BBI2C *pI2C, uint8_t iAddr, uint8_t u8Register, uint8_t *pData, int iLen, bool repeatedStart = false);
 //
 // Write I2C data
 // quits if a NACK is received and returns 0
@@ -107,5 +107,4 @@ void I2CInit(BBI2C *pI2C, uint32_t iClock);
 //
 int I2CDiscoverDevice(BBI2C *pI2C, uint8_t i);
 
-#endif //__BITBANG_I2C__
-
+#endif //__BITBANG_SMBUS__
