@@ -344,7 +344,7 @@ int iDelay = pI2C->iDelay;
   sleep_us(iDelay); // DEBUG - delay/2
 
   // check if slave keeps clock bus low (time stretching)
-  while (bool timeStretched = !SCL_READ(iSCL))
+  while (!SCL_READ(iSCL))
   {
     sleep_us(iDelay);
   }
@@ -463,6 +463,13 @@ int iDelay;
   SDA_HIGH(iSDA); // set data line for reading
   SCL_HIGH(iSCL); // clock line high
   sleep_us(pI2C->iDelay); // DEBUG - delay/2
+
+  // check if slave keeps clock bus low (time stretching)
+  while (!SCL_READ(iSCL))
+  {
+    sleep_us(iDelay);
+  }
+
   ack = SDA_READ(iSDA);
   SCL_LOW(iSCL); // clock low
   sleep_us(pI2C->iDelay); // DEBUG - delay/2
