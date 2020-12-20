@@ -387,6 +387,13 @@ uint8_t sclbit = iSCLBit;
   SDA_HIGH_AVR // set data line for reading
   SCL_HIGH_AVR // clock line high
 //  sleep_us(iDelay); // DEBUG - delay/2
+
+// check if slave keeps clock bus low (time stretching)
+  while (!SCL_READ_AVR)
+  {
+    sleep_us(pI2C->iDelay);
+  }
+
   ack = SDA_READ_AVR;
   SCL_LOW_AVR // clock low
 //  sleep_us(iDelay); // DEBUG - delay/2
@@ -398,7 +405,8 @@ uint8_t sclbit = iSCLBit;
 #define BOTH_HIGH_FAST *iDDR = both_high;
 #define SCL_HIGH_FAST *iDDR = scl_high;
 #define SDA_HIGH_FAST *iDDR = sda_high;
-#define SDA_READ_FAST *iDDR & iSDABit;
+#define SDA_READ_FAST (*iDDR & iSDABit);
+#define SCL_READ_FAST (*iPort_SCL_In & iSCLBit)
 static inline int i2cByteOutAVRFast(BBI2C *pI2C, uint8_t b)
 {
 uint8_t i, ack;
@@ -430,12 +438,19 @@ uint8_t sda_high = (bOld | iSCLBit) & ~iSDABit;
   SDA_HIGH_FAST // set data line for reading
   BOTH_HIGH_FAST // clock line high
   sleep_us(pI2C->iDelay); // DEBUG - delay/2
+
+// check if slave keeps clock bus low (time stretching)
+  while (!SCL_READ_FAST)
+  {
+    sleep_us(pI2C->iDelay);
+  }
+
   ack = SDA_READ_FAST;
   BOTH_LOW_FAST // clock low
 //  sleep_us(pI2C->iDelay); // DEBUG - delay/2
 //  SDA_LOW_AVR // data low
   return (ack == 0) ? 1:0; // a low ACK bit means success
-} /* i2cByteOutAVR() */
+} /* i2cByteOutAVRFast() */
 #endif // __AVR__
 
 #ifndef __AVR_ATtiny85__
