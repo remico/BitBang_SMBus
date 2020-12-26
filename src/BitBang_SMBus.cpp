@@ -660,12 +660,10 @@ void I2CInit(BBI2C *pI2C, uint32_t iClock)
      w600PinMode(pI2C->iSDA, GPIO_INPUT); // let the lines float (tri-state)
      w600PinMode(pI2C->iSCL, GPIO_INPUT);
 #else // generic
-     pinMode(pI2C->iSDA, OUTPUT);
-     pinMode(pI2C->iSCL, OUTPUT);
-     digitalWrite(pI2C->iSDA, LOW); // setting low = enabling as outputs
-     digitalWrite(pI2C->iSCL, LOW);
-     pinMode(pI2C->iSDA, INPUT); // let the lines float (tri-state)
      pinMode(pI2C->iSCL, INPUT);
+     pinMode(pI2C->iSDA, INPUT); // let the lines float (tri-state)
+     digitalWrite(pI2C->iSCL, LOW);
+     digitalWrite(pI2C->iSDA, LOW);
 #endif
 #endif
 #ifdef _LINUX_
@@ -690,10 +688,10 @@ void I2CInit(BBI2C *pI2C, uint32_t iClock)
 //      iSCLBit = 1 << (pI2C->iSCL & 0x7);
       iSCLBit = 1 << getPinInfo(pI2C->iSCL, &iDDR_SCL, &iPort_SCL_Out, 0);
       getPinInfo(pI2C->iSCL, &iDDR_SCL, &iPort_SCL_In, 1);
-      *iDDR_SDA &= ~iSDABit; // pinMode input
       *iDDR_SCL &= ~iSCLBit; // pinMode input
-      *iPort_SDA_Out &= ~iSDABit; // digitalWrite SDA LOW
-      *iPort_SCL_Out &= ~iSCLBit; // digitalWrite SCL LOW
+      *iDDR_SDA &= ~iSDABit; // pinMode input
+      *iPort_SCL_Out &= ~iSCLBit; // disable pull-up
+      *iPort_SDA_Out &= ~iSDABit; // disable pull-up
    }
 #endif // __AVR__
   // For now, we only support 100, 400 or 800K clock rates
